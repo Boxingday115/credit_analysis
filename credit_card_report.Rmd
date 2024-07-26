@@ -1,0 +1,130 @@
+---
+title: "Credit Card Default EDA"
+author: "Hampus Lennaárd"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse) # Silencing messages and warnings from load, redundant
+library(janitor)
+library(haven)
+```
+
+**Introduction**
+
+In this report we will analyse credit card data fetched from Keggle (Default of Credit Card Clients Dataset), see appendix. This dataset contains information on default payments along with other demographic factors and credit factors (credit, payment history, bill statements etc) from a Taiwanese sample dating April 2005 to September 2005. 
+
+We start by loading the data using a simple function, the inital dataset is named credit0 representing an untouched dataframe. 
+```{r function-load_data}
+load_csv <- function(path){
+  data <- read.csv(path)
+  
+  return(data)
+}
+
+credit0 <- load_csv("UCI_Credit_Card.csv") %>%
+  clean_names() # converting into snake_case for consistent column names  
+```
+
+After loading the data, we take a look at a sample of it to get an idea of the structure. In addition, a summary of the dataset is produced which also gives us an initial idea of the # of missing values within the data. 
+```{r introduce_data}
+str(credit0) # I prefer using str() over head() because it just provides the same info as head() plus a lot more. 
+
+# Saving # of unique ids as a value so I can print it using inline code 
+unique_ids <- length(unique(credit0$id))
+```
+
+The dataset shows a total of `r ncol(credit0)` columns and `r nrow(credit0)` rows, with a total of `r unique_ids` unique ids. 
+
+```{r function-find_missing_data}
+# Function to determine # of NA values within the dataset 
+sum_nas <- function(dataset) {
+
+  # Prepare final vectors 
+  final_df <- data.frame(
+    total_missing = integer(), 
+    col_name = character(),
+    stringsAsFactors = FALSE
+    )
+  
+  col_names_of_missing <- NA
+  
+  for(col in seq_along(dataset)) {
+    n_missing <- sum(is.na(dataset[[col]])) # check for missing values, count up the # of missing
+    
+    if(n_missing >= 1) {
+      col_name <- names(dataset[col]) # if missing value present, save column 
+      
+      # Adding info to df
+      final_df <- rbind(final_df, data.frame(total_missing = n_missing, col_name = col_name, stringsAsFactors = FALSE))
+    }
+  }
+  
+  return(final_df)
+}
+
+missing_df <- sum_nas(credit0)
+
+if (nrow(missing_df) == 0) {
+  missing_message <- "there are no missing values in the dataset."
+} else {
+  missing_df <- missing_df
+}
+```
+
+In terms of missing data `r missing_message`
+
+The columns are described by the author as:
+
+- limit_bal represents the amount of credit provided by the bank in NT dollar
+
+- pay_0 : pay_6 represents repayment statuses with pay_0 being in September followed by pay_2 being in August and pay_6 being in April
+
+- bill_amt1 : bill_amt6 represent amount of bill statement with the same date-scale as above, also in NT.  
+
+- pay_amt1 : pay_amt6 represent amount of previous payment with the same date-scale as above, also in NT. 
+
+- default_payment_next_month is a binary variable where 1 = yes and 0 = no. 
+
+The demographic columns are coded as:
+
+- sex: 1 = male, 2 = female
+
+- education: 1 = graduate school, 2 = university, 3 = high school, 4 = others, 5 = unknown, 6 = unknown
+
+- marriage: Marital status 1 = married, 2 = single, 3 = others
+
+- age: age in years 
+
+**Preprocessing data** 
+
+For some reason, both bill_amt and pay_amt start with 1 where as pay_ starts with 0, all three columns exist on the same date scale so to ensure consistency in the data - we rename the pay_ column. Moreover, there are several variables that are coded as integers which, for the EDA analysis we would like to use as factors so we convert these columns into factors. Lastly, the factor education has two levels both labeled as unknown, this is redundant so we will add these two levels into a single level. 
+
+There are some inconsistencies in the dataset provided so I will make some general assumptions about its structure, there was no consensus regarding this on Kaggle.
+
+Assumptions: 
+
+- For the columns pay_1 : pay_6 we assume that each pay_ represents an individual payment to be made. Thus a person may be behind on pay_1 up to >9 months while not necessarily behind        behind on pay_2:pay_6, they are not rolling in that sense. 
+
+```{r rename columns}
+credit1 <- credit0 %>%
+  rename(pay_1 = pay_0) %>%
+  mutate(
+    sex = haven::as_factor(sex),
+    education = haven::as_factor(education),
+    marriage = haven::as_factor(marriage),
+    education = fct_collapse(education, "5" = c("5", "6")), # collapsing education lvl 5 and 6 into 5 as both represent unknown 
+    across(matches("pay_[1-6]$"), ~ ifelse(. == -2, 0, .)), # using reg-expression to select pay_1:pay_6 but avoid pay_amt1:pay_amt6
+    total_months_behind = rowSums(select(., matches("^pay_[1-6]$")) * (select(., matches("^pay_[1-6]$")) >= 1), na.rm = TRUE), .after = pay_6 # summing total months 
+  ) 
+```
+
+
+
+
+Univariate Analysis 
